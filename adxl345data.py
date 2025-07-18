@@ -1,3 +1,5 @@
+
+
 import adxl345 #import the library
 from time import sleep
 
