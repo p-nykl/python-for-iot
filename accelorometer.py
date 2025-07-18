@@ -1,10 +1,15 @@
+
 import time
 import math
 import random
 import csv
 import os
+from telegram_bot import send_telegram_message
 
 # Keypad and LCD imports (assume running on Raspberry Pi for hardware)
+def detect_fall(prev_magnitude, curr_magnitude, threshold=800):
+    # Simple fall detection: sudden large change in acceleration magnitude
+    return abs(curr_magnitude - prev_magnitude) > threshold
 try:
     import RPi.GPIO as GPIO
     import I2C_LCD_driver
@@ -69,10 +74,13 @@ acc.set_data_rate(adxl345.DataRate.R_100)
 acc.set_range(adxl345.Range.G_16, full_res=True)
 acc.measure_start()
 
+
 step_count = 0
 inactive_seconds = 0
 prev_z = None
 threshold = 150  # adjust based on test
+prev_magnitude = None
+fall_alert_sent = False
 
 def get_magnitude(x, y, z):
     return math.sqrt(x**2 + y**2 + z**2)
@@ -110,6 +118,18 @@ with open(csv_filename, mode='a', newline='') as csvfile:
             inactive_seconds += 1
         else:
             inactive_seconds = 0
+
+        # Fall detection
+        global fall_alert_sent
+        if prev_magnitude is not None:
+            if detect_fall(prev_magnitude, magnitude):
+                if not fall_alert_sent:
+                    print("⚠️ Fall detected! Sending Telegram alert...")
+                    send_telegram_message("⚠️ Fall detected for the elderly! Please check immediately.")
+                    fall_alert_sent = True
+            else:
+                fall_alert_sent = False
+        prev_magnitude = magnitude
 
         if inactive_seconds > 60:
             print("⚠️ Inactivity detected for over 60 seconds!")
