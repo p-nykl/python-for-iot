@@ -3,12 +3,15 @@ import I2C_LCD_driver
 from threading import Thread
 import queue
 import time
+import requests
 
 shared_keypad_queue = queue.Queue()
 lcd = None
 
 def key_pressed(key):
     shared_keypad_queue.put(key)
+
+
     
 def main():
     global lcd
@@ -39,14 +42,17 @@ def main():
             
             if keyvalue == 1: 
                 print("Eaten")
+                condition="eaten"
             elif keyvalue == 2:
                 print("Walked")
+                condition="walked"
             
             feeling = knowthembetter()
             print("Feeling rating:", feeling)
             time.sleep(1)
             ending_speech()
             time.sleep(2)
+            send_telegram_message(feeling,condition)
             
     except Exception as e:
         print(f"Error: {e}")
@@ -72,6 +78,18 @@ def ending_speech():
     time.sleep(0.1)
     lcd.lcd_display_string("Have a nice day", 1)
     time.sleep(1)
+
+def send_details(feeling):
+    import requests
+
+def send_telegram_message(feeling,condition):
+        TELEGRAM_BOT_TOKEN = '7885273126:AAEpr5Dy9bUXYE3kf9lEH1ww2bXsByE9y5c'
+        TELEGRAM_CHAT_ID = '6101168212'
+        message=f"user feeling: {feeling}, Condition: {condition}"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+        requests.post(url, data=data, timeout=5)
+     
 
 if __name__ == '__main__':
     main()
