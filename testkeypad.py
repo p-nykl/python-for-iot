@@ -1,68 +1,77 @@
 import keypad
 import I2C_LCD_driver
-import Thread
+from threading import Thread
+import queue
+import time
 
 shared_keypad_queue = queue.Queue()
+lcd = None
 
 def key_pressed(key):
     shared_keypad_queue.put(key)
     
 def main():
-    lcd = I2C_LCD_driver.lcd()
-    keypad.init(key_pressed)
-    keypad_thread = Thread(target=keypad.get_key)
-    keypad_thread.start()
-
-    while(True):
-        lcd.lcd_clear()
-        lcd.lcd_display_string("1.Eaten", 1)
-        lcd.lcd_display_string("2.Walked", 2)
-     
-        keyvalue= shared_keypad_queue.get()
-
-        print("key value ", keyvalue)
-        
-
-        if(keyvalue == 1): 
-            feeling = knowthembetter(keyvalue)
-            print(feeling)
-           
-
-        elif (keyvalue == 2):
-            feeling = knowthembetter(keyvalue)
-            print(feeling)
-
-def knowthembetter(keyvalue):
-    lcd = I2C_LCD_driver.lcd()
-    lcd.lcd_display_string("Rate ur feeling", 1)
-    lcd.lcd_display_string("from 1-9", 2)
-    if(keyvalue == 1): 
-            return 1
-
-    elif (keyvalue == 2):
-            return 2
+    global lcd
     
-    elif (keyvalue == 3):
-            return 3
+    try:
+        # Initialize LCD first
+        lcd = I2C_LCD_driver.lcd()
+        time.sleep(0.5)  # Give LCD time to initialize
+        
+        # Then initialize keypad
+        keypad.init(key_pressed)
+        time.sleep(0.5)  # Give keypad time to initialize
+        
+        keypad_thread = Thread(target=keypad.get_key)
+        keypad_thread.daemon = True
+        keypad_thread.start()
+        time.sleep(0.5)  # Let thread start properly
 
-    elif (keyvalue == 4):
-            return 4
+        while True:
+            lcd.lcd_clear()
+            time.sleep(0.1)  # Small delay after clear
+            lcd.lcd_display_string("1.Eaten", 1)
+            time.sleep(0.1)
+            lcd.lcd_display_string("2.Walked", 2)
+         
+            keyvalue = shared_keypad_queue.get()
+            print("key value ", keyvalue)
+            
+            if keyvalue == 1: 
+                print("Eaten")
+            elif keyvalue == 2:
+                print("Walked")
+            
+            feeling = knowthembetter()
+            print("Feeling rating:", feeling)
+            time.sleep(1)
+            ending_speech()
+            time.sleep(2)
+            
+    except Exception as e:
+        print(f"Error: {e}")
 
-    elif (keyvalue == 5):
-            return 5
+def knowthembetter():
+    global lcd
+    lcd.lcd_clear()
+    time.sleep(0.1)
+    lcd.lcd_display_string("Rate ur feeling", 1)
+    time.sleep(0.1)
+    lcd.lcd_display_string("from 1-9", 2)
+    
+    keyvalue = shared_keypad_queue.get()
+    
+    if 1 <= keyvalue <= 9:
+        return keyvalue
+    else:
+        return 5
 
-    elif (keyvalue == 6):
-            return 6
-
-    elif (keyvalue == 7):
-            return 7
-
-    elif (keyvalue == 8):
-            return 8
-
-    elif (keyvalue == 9):
-            return 9
-
+def ending_speech():
+    global lcd
+    lcd.lcd_clear()
+    time.sleep(0.1)
+    lcd.lcd_display_string("Have a nice day", 1)
+    time.sleep(1)
 
 if __name__ == '__main__':
     main()
