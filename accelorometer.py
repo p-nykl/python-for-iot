@@ -1,15 +1,19 @@
-
 import time
 import math
 import random
 import csv
 import os
 from telegram_bot import send_telegram_message
+from led_alert import blink_led
+from buzzer_alert import buzz_buzzer
 
-# Keypad and LCD imports (assume running on Raspberry Pi for hardware)
-def detect_fall(prev_magnitude, curr_magnitude, threshold=800):
-    # Simple fall detection: sudden large change in acceleration magnitude
-    return abs(curr_magnitude - prev_magnitude) > threshold
+# Fall detection with debug and low threshold
+def detect_fall(prev_magnitude, curr_magnitude, threshold=0.1):
+    diff = abs(curr_magnitude - prev_magnitude)
+    print(f"[DEBUG] Magnitude: {curr_magnitude:.5f}, Prev: {prev_magnitude:.5f}, Diff: {diff:.5f}")
+    return diff > threshold
+
+# GPIO and LCD setup
 try:
     import RPi.GPIO as GPIO
     import I2C_LCD_driver
@@ -17,7 +21,7 @@ except ImportError:
     GPIO = None
     I2C_LCD_driver = None
 
-# Try to import adxl345, else mock it for Windows testing
+# Accelerometer import or mock
 try:
     import adxl345
 except ImportError:
@@ -37,29 +41,26 @@ except ImportError:
         def measure_start(self):
             pass
         def get_3_axis_adjusted(self):
-            # Return random values for testing
             return (
-                random.randint(-200, 200),
-                random.randint(-200, 200),
-                random.randint(-200, 200)
+                random.uniform(-0.05, 0.2),
+                random.uniform(-0.05, 0.2),
+                random.uniform(-0.05, 1.0)
             )
     adxl345 = type('adxl345', (), {'ADXL345': MockADXL345, 'DataRate': MockADXL345.DataRate, 'Range': MockADXL345.Range})
 
-
-
-# Keypad setup
-MATRIX = [ [1,2,3], [4,5,6], [7,8,9], ['*',0,'#'] ]
-ROW = [6,20,19,13]
-COL = [12,5,16]
+# Keypad configuration
+MATRIX = [[1, 2, 3], [4, 5, 6], [7, 8, 9], ['*', 0, '#']]
+ROW = [6, 20, 19, 13]
+COL = [12, 5, 16]
 
 if GPIO:
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
     for i in range(3):
-        GPIO.setup(COL[i],GPIO.OUT)
-        GPIO.output(COL[i],1)
+        GPIO.setup(COL[i], GPIO.OUT)
+        GPIO.output(COL[i], 1)
     for j in range(4):
-        GPIO.setup(ROW[j],GPIO.IN,pull_up_down=GPIO.PUD_UP)
+        GPIO.setup(ROW[j], GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # LCD setup
 LCD = I2C_LCD_driver.lcd() if I2C_LCD_driver else None
@@ -68,23 +69,25 @@ LCD = I2C_LCD_driver.lcd() if I2C_LCD_driver else None
 csv_filename = 'activity_log.csv'
 write_header = not os.path.exists(csv_filename)
 
+# Accelerometer setup
 acc = adxl345.ADXL345(i2c_port=1, address=0x53)
 acc.load_calib_value()
 acc.set_data_rate(adxl345.DataRate.R_100)
 acc.set_range(adxl345.Range.G_16, full_res=True)
 acc.measure_start()
 
-
+# Variables
 step_count = 0
 inactive_seconds = 0
 prev_z = None
-threshold = 150  # adjust based on test
+step_threshold = 0.0015
 prev_magnitude = None
 fall_alert_sent = False
 
 def get_magnitude(x, y, z):
     return math.sqrt(x**2 + y**2 + z**2)
 
+# Main loop
 with open(csv_filename, mode='a', newline='') as csvfile:
     fieldnames = ['timestamp', 'x', 'y', 'z', 'posture', 'step_count', 'inactive_seconds']
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -95,13 +98,12 @@ with open(csv_filename, mode='a', newline='') as csvfile:
         x, y, z = acc.get_3_axis_adjusted()
 
         # Step detection
-        if prev_z is not None:
-            if abs(z - prev_z) > threshold:
-                step_count += 1
-                print(f"Step detected! Total steps: {step_count}")
+        if prev_z is not None and abs(z - prev_z) > step_threshold:
+            step_count += 1
+            print(f"Step detected! Total steps: {step_count}")
         prev_z = z
 
-        # Posture detection using angles
+        # Posture detection
         pitch = math.degrees(math.atan2(x, math.sqrt(y*y + z*z)))
         roll = math.degrees(math.atan2(y, math.sqrt(x*x + z*z)))
 
@@ -114,54 +116,64 @@ with open(csv_filename, mode='a', newline='') as csvfile:
 
         # Inactivity detection
         magnitude = get_magnitude(x, y, z)
-        if magnitude < 200:  # adjust based on scale
+        if magnitude < 0.02:
             inactive_seconds += 1
         else:
             inactive_seconds = 0
 
         # Fall detection
-        global fall_alert_sent
+        fall_cooldown_seconds = 10
+        last_fall_time = 0
+
+        # Inside main loop
+        current_time = time.time()
         if prev_magnitude is not None:
+            diff = abs(magnitude - prev_magnitude)
             if detect_fall(prev_magnitude, magnitude):
-                if not fall_alert_sent:
+                if current_time - last_fall_time > fall_cooldown_seconds:
                     print("⚠️ Fall detected! Sending Telegram alert...")
                     send_telegram_message("⚠️ Fall detected for the elderly! Please check immediately.")
-                    fall_alert_sent = True
-            else:
-                fall_alert_sent = False
+                    if GPIO:
+                        buzz_buzzer(5)
+                        blink_led(5)
+                    last_fall_time = current_time  # start cooldown
+                    print(f"[FallCheck] Diff: {diff:.5f}, Time since last: {current_time - last_fall_time:.2f}s")
         prev_magnitude = magnitude
+
 
         if inactive_seconds > 60:
             print("⚠️ Inactivity detected for over 60 seconds!")
 
-        print(f"X:{x}, Y:{y}, Z:{z}, Posture: {posture}")
+        # Print current status
+        print(f"X:{x:.5f}, Y:{y:.5f}, Z:{z:.5f}, Posture: {posture}")
+        print(f"Steps taken so far: {step_count}")
 
         # Write to CSV
         writer.writerow({
             'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'x': x,
-            'y': y,
-            'z': z,
+            'x': round(x, 5),
+            'y': round(y, 5),
+            'z': round(z, 5),
             'posture': posture,
             'step_count': step_count,
             'inactive_seconds': inactive_seconds
         })
         csvfile.flush()
 
-        # Keypad check: if '1' is pressed, show step count on LCD
+        # Keypad check to display step count
         if GPIO and LCD:
             key_pressed = None
             for i in range(3):
-                GPIO.output(COL[i],0)
+                GPIO.output(COL[i], 0)
                 for j in range(4):
-                    if GPIO.input(ROW[j])==0:
+                    if GPIO.input(ROW[j]) == 0:
                         key_pressed = MATRIX[j][i]
-                        while GPIO.input(ROW[j])==0:
+                        while GPIO.input(ROW[j]) == 0:
                             time.sleep(0.1)
-                GPIO.output(COL[i],1)
+                GPIO.output(COL[i], 1)
             if key_pressed == 1:
                 LCD.lcd_clear()
                 LCD.lcd_display_string("Steps taken:", 1)
                 LCD.lcd_display_string(str(step_count), 2)
 
-        time.sleep(1)
+        time.sleep(0.1)  # Prevent crash from too-fast looping
