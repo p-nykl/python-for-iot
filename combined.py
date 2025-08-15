@@ -244,6 +244,31 @@ def write_data_to_csv(timestamp, temperature, humidity, user_status, user_feelin
     
     print("Data saved to CSV")
 
+
+
+def summary_of_the_day(activities_list, missed_checkins_count, alerts_list):
+    print("\n--- Summary of the Day ---")
+
+    print("\nActivities Recorded:")
+    if activities_list:
+        for activity in activities_list:
+            print(f"- {activity}")
+    else:
+        print("No activities recorded today.")
+
+    print(f"\nMissed Check-ins: {missed_checkins_count}")
+
+    print("\nAlerts Sent:")
+    if alerts_list:
+        for alert in alerts_list:
+            print(f"- {alert}")
+    else:
+        print("No alerts sent today.")
+
+    print("-------------------------\n")
+
+
+
 def main():
     global lcd
     lcd = I2C_LCD_driver.lcd()
@@ -370,10 +395,17 @@ def main():
                     lcd.lcd_clear()
                     time.sleep(0.1)
                     lcd.lcd_display_string(f"Steps: {shared_data['steps']}", 1)
-                    time.sleep(0.1)
-                    lcd.lcd_display_string(f"Posture: {shared_data['posture'][:16]}", 2)
-                    time.sleep(3)
+                    summary_of_the_day()
                     
+                
+
+                elif keyvalue == 0:
+                    # Display current statistics
+                    lcd.lcd_clear()
+                    time.sleep(0.1)
+                    lcd.lcd_display_string(
+                    summary_of_the_day(activities_list, missed_checkins_count, alerts_list))
+
                 temp_update_counter = 0
                 
             except queue.Empty:
